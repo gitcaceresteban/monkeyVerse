@@ -1,0 +1,20 @@
+[Unit]
+Description=monkeyVerse v2 — persistent living-planet laboratory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/monkeyVerse
+Environment=HOST=0.0.0.0
+Environment=PORT=8000
+Environment=MONKEYVERSE_DATA=/home/pi/monkeyVerse/data2
+ExecStart=/home/pi/monkeyVerse/.venv/bin/python /home/pi/monkeyVerse/main2.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
