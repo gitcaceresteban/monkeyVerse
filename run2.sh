@@ -11,6 +11,7 @@ if [ ! -d "$VENV" ]; then
   "$VENV/bin/pip" install -r requirements.txt
 fi
 export HOST="${HOST:-0.0.0.0}"
-export PORT="${PORT:-8000}"
+# 8001 by default: v1 (run.sh / monkeyverse.service) already owns port 8000.
+export PORT="${PORT:-8001}"
 export MONKEYVERSE_DATA="${MONKEYVERSE_DATA:-data2}"
 exec "$VENV/bin/python" main2.py
