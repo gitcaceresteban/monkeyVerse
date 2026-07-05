@@ -1,0 +1,22 @@
+[Unit]
+Description=monkeyVerse — persistent artificial-life laboratory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Adjust User and paths to your setup:
+User=pi
+WorkingDirectory=/home/pi/monkeyVerse
+Environment=HOST=0.0.0.0
+Environment=PORT=8000
+Environment=MONKEYVERSE_DATA=/home/pi/monkeyVerse/data
+ExecStart=/home/pi/monkeyVerse/.venv/bin/python /home/pi/monkeyVerse/main.py
+Restart=always
+RestartSec=5
+# graceful shutdown so a final snapshot is written
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

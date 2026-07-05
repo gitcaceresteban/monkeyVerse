@@ -1,0 +1,16 @@
+# runtime data (worlds live here; do not commit)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# os / editor
+.DS_Store
+*.swp

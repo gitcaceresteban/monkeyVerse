@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>monkeyVerse · laboratorio de vida artificial</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐒</text></svg>">
+</head>
+<body>
+<div class="app">
+  <!-- ---------------- sidebar : list of worlds ---------------- -->
+  <aside class="sidebar">
+    <div class="brand">
+      <h1><span>monkey</span>Verse</h1>
+      <p>Un laboratorio de vida artificial. Observa mundos que evolucionan solos, 24/7.</p>
+    </div>
+    <div class="sim-list" id="simList"></div>
+    <button class="btn new-btn" id="newBtn">＋ Nuevo mundo</button>
+  </aside>
+
+  <!-- ---------------- main : the world ---------------- -->
+  <main class="main">
+    <div class="stage" id="stage">
+      <canvas id="world"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="empty" id="empty">
+        <h2>Ningún mundo seleccionado</h2>
+        <p>Crea un mundo nuevo o elige uno de la lista para observarlo.</p>
+        <button class="btn" id="emptyNew">＋ Crear el primer mundo</button>
+      </div>
+      <div class="inspector" id="inspector">
+        <h4><span id="insTitle">Individuo</span><span class="close" id="insClose">✕</span></h4>
+        <div id="insBody"></div>
+      </div>
+    </div>
+    <div class="controls" id="controls" style="display:none">
+      <button class="btn small" id="pauseBtn">⏸ Pausar</button>
+      <label>Velocidad</label>
+      <input type="range" id="speed" min="1" max="120" value="25" style="width:120px">
+      <span id="speedVal" style="font-size:12px;color:var(--muted);width:70px">25 p/s</span>
+      <div class="sep"></div>
+      <button class="btn small ghost" data-iv="food">🍃 Sembrar</button>
+      <button class="btn small ghost" data-iv="drought">☀ Sequía</button>
+      <button class="btn small ghost" data-iv="bloom">🌱 Florecer</button>
+      <button class="btn small ghost" data-iv="calm">≈ Calmar</button>
+      <button class="btn small danger" id="deleteBtn">🗑 Eliminar</button>
+    </div>
+  </main>
+
+  <!-- ---------------- rightbar : analytics ---------------- -->
+  <aside class="rightbar" id="rightbar" style="display:none">
+    <div class="tabbar">
+      <button class="active" data-tab="live">Estado</button>
+      <button data-tab="history">Historia</button>
+      <button data-tab="events">Eventos</button>
+    </div>
+
+    <div class="tabpane active" id="tab-live">
+      <div class="statgrid" id="statgrid"></div>
+      <div class="chart-block">
+        <h4>Rasgos genéticos promedio</h4>
+        <div id="genes"></div>
+      </div>
+    </div>
+
+    <div class="tabpane" id="tab-history">
+      <div class="chart-block"><h4>Población</h4><canvas class="chart" id="chartPop"></canvas></div>
+      <div class="chart-block"><h4>Nacimientos vs muertes</h4><canvas class="chart" id="chartBD"></canvas></div>
+      <div class="chart-block"><h4>Generación máxima</h4><canvas class="chart" id="chartGen"></canvas></div>
+      <div class="chart-block"><h4>Actividad de señales</h4><canvas class="chart" id="chartSig"></canvas></div>
+      <button class="btn small ghost" id="refreshHist" style="width:100%">↻ Actualizar historia</button>
+    </div>
+
+    <div class="tabpane" id="tab-events">
+      <div class="event-log" id="eventLog"></div>
+    </div>
+  </aside>
+</div>
+
+<!-- ---------------- config modal ---------------- -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2>Crear un mundo</h2>
+    <p class="sub">Define solo las <b>condiciones mínimas de existencia</b>. No se programa ninguna
+      conducta: cooperación, lenguaje o territorio solo pueden emerger por sí solos.
+      Lanza varios mundos con distintos valores para hacer análisis de sensibilidad.</p>
+    <div class="form-grid" id="formGrid"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn" id="createBtn">Crear y observar</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
