@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>monkeyVerse v3 · planeta observable</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔭</text></svg>">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div>
+        <h1><span>monkey</span>Verse <span class="v">v3</span></h1>
+      </div>
+      <button class="closebtn" id="closeSidebar">✕</button>
+    </div>
+    <p>Planeta vivo y observable, en tiempo real. Selecciona un individuo, escucha su lenguaje, sigue su historia.</p>
+    <div class="sim-list" id="simList"></div>
+    <button class="btn new-btn" id="newBtn">＋ Nuevo planeta</button>
+  </aside>
+
+  <main class="main">
+    <div class="stage" id="stage">
+      <canvas id="world"></canvas>
+      <div class="hud" id="hud"></div>
+      <div class="mobile-tabs">
+        <button id="openSidebarBtn">☰</button>
+        <button id="openRightbarBtn">📊</button>
+      </div>
+      <div class="empty" id="empty">
+        <h2>Ningún planeta seleccionado</h2>
+        <p>Crea un planeta nuevo o elige uno de la lista para observarlo.</p>
+        <button class="btn" id="emptyNew">＋ Crear el primer planeta</button>
+      </div>
+      <div class="inspector" id="inspector">
+        <h4><span id="insTitle">Individuo</span><span class="close" id="insClose">✕</span></h4>
+        <div id="insBody"></div>
+        <div class="actions">
+          <button class="btn small toggle" id="followBtn">🎯 Seguir</button>
+          <button class="btn small ghost" id="playSymbolBtn">🔊 Repetir sonido</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="timeline" id="timeline" style="display:none">
+      <span class="lbl">🕰️ <span id="tlMode">En vivo</span></span>
+      <input type="range" id="tlSlider" min="0" max="0" value="0">
+      <span class="lbl" style="min-width:64px">t <b id="tlTick">—</b></span>
+      <button class="btn small violet" id="tlLive">▶ En vivo</button>
+    </div>
+
+    <div class="toolbar" id="toolbar" style="display:none">
+      <button class="btn small" id="pauseBtn">⏸</button>
+      <span class="chip" id="rateChip" style="pointer-events:auto">8 t/s (tiempo real)</span>
+      <label>color</label>
+      <select id="colorMode" style="background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px">
+        <option value="species">especie</option>
+        <option value="diet">dieta</option>
+      </select>
+      <button class="btn small toggle" id="toggleRadii">◎ radios</button>
+      <button class="btn small toggle" id="toggleTraj">〰 trayectorias</button>
+      <button class="btn small toggle" id="toggleSound">🔊 sonido</button>
+      <input type="range" id="volume" min="0" max="100" value="60" style="width:70px">
+      <div class="sep"></div>
+      <button class="btn small tool" data-tool="food">🍃 sembrar</button>
+      <button class="btn small tool" data-tool="rain">🌧️ lluvia</button>
+      <button class="btn small tool" data-tool="drought">☀️ sequía</button>
+      <button class="btn small tool" data-tool="fire">🔥 fuego</button>
+      <button class="btn small tool" data-tool="flood">🌊 inundar</button>
+      <button class="btn small tool" data-tool="quake">💥 sismo</button>
+      <button class="btn small tool" data-tool="raise">⛰️ elevar</button>
+      <button class="btn small tool" data-tool="sink">🕳️ hundir</button>
+      <button class="btn small tool" data-tool="meteor">☄️ meteoro</button>
+      <button class="btn small tool" data-tool="spawn_species">🧬 nueva especie</button>
+      <div class="sep"></div>
+      <button class="btn small violet" id="forkBtn">🌱 bifurcar</button>
+      <button class="btn small ghost" id="exportBtn">⬇ exportar</button>
+      <button class="btn small danger" id="deleteBtn">🗑</button>
+    </div>
+  </main>
+
+  <aside class="rightbar" id="rightbar">
+    <div class="tabbar">
+      <button class="active" data-tab="live">Estado</button>
+      <button data-tab="species">Especies</button>
+      <button data-tab="agents">Agentes</button>
+      <button data-tab="interactions">Interacciones</button>
+      <button data-tab="language">Lenguaje</button>
+      <button data-tab="brains">Cerebros</button>
+      <button data-tab="history">Historia</button>
+    </div>
+
+    <div class="tabpane active" id="tab-live">
+      <div class="statgrid" id="statgrid"></div>
+      <div class="section-h">Niveles tróficos</div>
+      <div class="trophic" id="trophic"></div>
+      <div class="section-h">Rasgos genéticos promedio</div>
+      <div id="genes"></div>
+    </div>
+
+    <div class="tabpane" id="tab-species">
+      <div class="section-h">Especies vivas</div>
+      <div id="speciesList"></div>
+    </div>
+
+    <div class="tabpane" id="tab-agents">
+      <div class="section-h">Individuos vivos (clic para seguir)</div>
+      <div id="agentList"></div>
+    </div>
+
+    <div class="tabpane" id="tab-interactions">
+      <div class="filter-row">
+        <select id="filterAgent"><option value="">Cualquier agente</option></select>
+        <select id="filterType">
+          <option value="">Cualquier tipo</option>
+          <option value="encuentro">encuentro</option>
+          <option value="cooperación">cooperación</option>
+          <option value="competencia">competencia</option>
+          <option value="reproducción">reproducción</option>
+          <option value="ataque">ataque</option>
+          <option value="señal">señal</option>
+          <option value="seguimiento">seguimiento</option>
+        </select>
+        <button class="btn small ghost" id="refreshInter">↻</button>
+      </div>
+      <div id="interList"></div>
+    </div>
+
+    <div class="tabpane" id="tab-language">
+      <div class="section-h">Diversidad de lenguaje</div>
+      <div class="statgrid" id="langDiversity"></div>
+      <div class="section-h">Símbolos más usados (clic para escuchar)</div>
+      <div id="symbolChips"></div>
+      <div class="section-h">Significado empírico por especie</div>
+      <p style="color:var(--muted);font-size:10.5px;margin:0 0 8px">
+        Ningún símbolo tiene un efecto programado. Esta tabla muestra correlaciones
+        medidas entre símbolo y contexto — si aparece, el significado emergió solo.
+      </p>
+      <div id="langAssoc"></div>
+    </div>
+
+    <div class="tabpane" id="tab-brains">
+      <div class="section-h">Complejidad de cerebro por especie</div>
+      <p style="color:var(--muted);font-size:10.5px;margin:0 0 8px">
+        No es posible visualizar los pesos de una red directamente. Esta es una
+        aproximación: cuánto se aleja el cerebro de una especie de su inicialización aleatoria.
+      </p>
+      <div id="brainList"></div>
+    </div>
+
+    <div class="tabpane" id="tab-history">
+      <div class="chart-block"><h4>Población</h4><canvas class="chart" id="cPop"></canvas></div>
+      <div class="chart-block"><h4>Especies vivas</h4><canvas class="chart" id="cSpp"></canvas></div>
+      <div class="chart-block"><h4>Herbívoros vs carnívoros</h4><canvas class="chart" id="cTro"></canvas></div>
+      <div class="chart-block"><h4>Nacimientos vs muertes</h4><canvas class="chart" id="cBD"></canvas></div>
+      <div class="chart-block"><h4>Diversidad genética vs lingüística</h4><canvas class="chart" id="cDiv"></canvas></div>
+      <div class="section-h">Crónica del planeta</div>
+      <div id="chronicle"></div>
+      <button class="btn small ghost" id="refreshHist" style="width:100%;margin-top:8px">↻ Actualizar</button>
+    </div>
+  </aside>
+</div>
+
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <h2>Crear un mundo</h2>
+    <p class="sub">Define solo las <b>condiciones mínimas de existencia</b>. Ninguna conducta social está
+      programada — el lenguaje, la cooperación o los territorios solo pueden emerger. El planeta corre en
+      <b>tiempo real</b> a un ritmo fijo, no acelerado.</p>
+    <div class="form-grid" id="formGrid"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="cancelBtn">Cancelar</button>
+      <button class="btn" id="createBtn">Crear y observar</button>
+    </div>
+  </div>
+</div>
+<script src="/audio.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

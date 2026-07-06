@@ -1,0 +1,21 @@
+[Unit]
+Description=monkeyVerse v3 — observable living-planet laboratory
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/monkeyVerse
+Environment=HOST=0.0.0.0
+# 8002: v1's unit (monkeyverse.service) owns 8000, v2's (monkeyverse2.service) owns 8001.
+Environment=PORT=8002
+Environment=MONKEYVERSE_DATA=/home/pi/monkeyVerse/data3
+ExecStart=/home/pi/monkeyVerse/.venv/bin/python /home/pi/monkeyVerse/main3.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

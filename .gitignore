@@ -1,6 +1,7 @@
 # runtime data (worlds live here; do not commit)
 data/
 data2/
+data3/
 *.db
 *.db-wal
 *.db-shm
