@@ -116,8 +116,49 @@ def create_app(data_dir: str = "data3") -> FastAPI:
     def agent(sid: str, aid: int):
         r = _need(sid)
         with r.lock:
-            live = r.sim.agent_detail(aid)
+            live = r.sim.agent_detail(aid, full=True)
+        total_desc = r.persistence.descendants_count(aid)
+        if live and "reproduction" in live:
+            live["reproduction"]["total_descendants"] = total_desc
         return {"live": live, "genealogy": r.persistence.agent_genealogy(aid)}
+
+    @app.get("/api/simulations/{sid}/compare")
+    def compare(sid: str, a: int, b: int):
+        r = _need(sid)
+        with r.lock:
+            res = r.sim.compare(a, b)
+        if res is None:
+            raise HTTPException(404, "agent not found")
+        return res
+
+    @app.get("/api/simulations/{sid}/discoveries")
+    def discoveries(sid: str, limit: int = 200):
+        return _need(sid).persistence.discoveries_list(limit)
+
+    @app.get("/api/simulations/{sid}/agent/{aid}/export.json")
+    def agent_export(sid: str, aid: int):
+        r = _need(sid)
+        with r.lock:
+            data = r.sim.agent_export(aid)
+        if data is None:
+            raise HTTPException(404, "agent not found")
+        data["total_descendants"] = r.persistence.descendants_count(aid)
+        data["genealogy"] = r.persistence.agent_genealogy(aid)
+        headers = {"Content-Disposition": f'attachment; filename="{sid}-agent-{aid}.json"'}
+        return Response(content=json.dumps(data, default=str), media_type="application/json",
+                        headers=headers)
+
+    @app.get("/api/simulations/{sid}/species/{spid}/export.json")
+    def species_export(sid: str, spid: int):
+        r = _need(sid)
+        data = r.persistence.species_export(spid)
+        with r.lock:
+            data["language_profile"] = r.sim.symbol_stats.species_profile(spid)
+            data["current"] = [r.sim.agent_detail(a.id, full=False)
+                               for a in r.sim.agents if a.species_id == spid][:200]
+        headers = {"Content-Disposition": f'attachment; filename="{sid}-species-{spid}.json"'}
+        return Response(content=json.dumps(data, default=str), media_type="application/json",
+                        headers=headers)
 
     # ------------------------------------------------------------- interactions
     @app.get("/api/simulations/{sid}/interactions")

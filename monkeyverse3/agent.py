@@ -1,7 +1,25 @@
-"""An organism. Just state + the machinery for within-life learning and the
-observability trail (trajectory, recent interactions, recent symbols, current
-state label). What it *does* each step is decided by its brain inside the
-simulation loop — this class only carries what happened.
+"""An organism. State + within-life learning + the observability trail.
+
+v3.1 turns each agent into an analysable subject. On top of the trajectory /
+recent-interactions / recent-symbols trail it already had, it now keeps, *cheaply
+for every agent*:
+
+  - a chronological episodic event log (found food, ate, heard/emitted a signal,
+    followed / was followed, attacked / was attacked, reproduced, discovered
+    territory, a neighbour died);
+  - detailed combat counters (attacks made/won/lost, damage dealt/received,
+    energy gained, kills);
+  - behaviour counters used to *derive* an emergent personality (moves, rests,
+    cooperations, follows, signals, times attacked) and a coarse territory
+    bitset (which regions of the world it has ever visited);
+  - "life firsts" ticks (first food/attack/reproduction/signal) for its timeline.
+
+And *only while it is in the observer's spotlight* (selected / followed /
+compared — at most a handful of agents), it additionally records the expensive
+introspection data (the exact perception input, a rolling buffer of hidden
+activations and chosen actions, recent rewards) needed for decision traces and
+cognitive metrics. Everything else stays off, so the cost is bounded no matter
+how many hundreds of agents are alive.
 """
 
 from __future__ import annotations
@@ -15,6 +33,10 @@ from .memory import Memory
 STATES = ("explorando", "buscando_comida", "huyendo", "reproduciéndose",
           "descansando", "siguiendo_señal", "interactuando", "cazando")
 
+# coarse territory grid (a Python int is used as a bitset over these blocks)
+TERR_COLS, TERR_ROWS = 12, 8
+TERR_BLOCKS = TERR_COLS * TERR_ROWS
+
 
 class Agent:
     __slots__ = ("id", "genome", "x", "y", "energy", "age", "generation",
@@ -23,7 +45,17 @@ class Agent:
                  "inv_food", "inv_mat", "prev_energy", "moved", "resting",
                  "n_attacks", "n_children", "n_sound", "state",
                  "trajectory", "last_interactions", "last_symbols", "traj_cap",
-                 "interact_cap", "symbol_cap", "follow_target", "follow_streak")
+                 "interact_cap", "symbol_cap", "follow_target", "follow_streak",
+                 # episodic + counters (cheap, all agents)
+                 "events", "event_cap",
+                 "atk_won", "atk_lost", "dmg_dealt", "dmg_received",
+                 "energy_from_atk", "wounds", "kills",
+                 "n_moves", "n_rests", "n_coop", "n_follow", "n_followed",
+                 "peak_energy", "territory_bits", "new_cells", "sym_counts",
+                 "t_first_food", "t_first_attack", "t_first_repro", "t_first_signal",
+                 # spotlight-only (expensive, few agents)
+                 "spotlighted", "last_input", "act_buffer", "act_history",
+                 "reward_history", "last_confidence", "spot_cap")
 
     def __init__(self, aid, genome: Genome, x, y, energy, generation, parent_id,
                  birth_tick, cfg, species_id=0):
@@ -58,9 +90,42 @@ class Agent:
         self.symbol_cap = 12
         self.trajectory: list[tuple[int, int]] = [(x, y)]
         self.last_interactions: list[dict] = []
-        self.last_symbols: list[tuple[int, int]] = []   # (tick, symbol)
-        self.follow_target: int = 0                      # 0 = none (agent ids start at 1)
+        self.last_symbols: list[tuple[int, int]] = []
+        self.follow_target: int = 0
         self.follow_streak: int = 0
+
+        # episodic + counters
+        self.events: list[dict] = []
+        self.event_cap = 40
+        self.atk_won = 0
+        self.atk_lost = 0
+        self.dmg_dealt = 0.0
+        self.dmg_received = 0.0
+        self.energy_from_atk = 0.0
+        self.wounds = 0
+        self.kills = 0
+        self.n_moves = 0
+        self.n_rests = 0
+        self.n_coop = 0
+        self.n_follow = 0
+        self.n_followed = 0
+        self.peak_energy = float(energy)
+        self.territory_bits = 0
+        self.new_cells = 0
+        self.sym_counts = [0] * 10   # lifetime tally of each language symbol used
+        self.t_first_food = 0
+        self.t_first_attack = 0
+        self.t_first_repro = 0
+        self.t_first_signal = 0
+
+        # spotlight-only
+        self.spotlighted = False
+        self.last_input = None
+        self.act_buffer: list = []
+        self.act_history: list = []
+        self.reward_history: list = []
+        self.last_confidence = 0.0
+        self.spot_cap = 64
 
     def think(self, x_in):
         out, h = self.genome.forward(x_in, self.fast_w2)
@@ -69,8 +134,6 @@ class Agent:
         return out
 
     def learn(self, reward: float, lr: float, decay: float) -> None:
-        """Reward-modulated plasticity (trial-and-error) plus forgetting,
-        delegated to the standalone brain module."""
         if self.last_h is not None:
             self.fast_w2 = brainmod.hebbian_update(self.fast_w2, self.last_h,
                                                     self.last_out, reward, lr)
@@ -92,6 +155,55 @@ class Agent:
         if len(self.last_symbols) > self.symbol_cap:
             self.last_symbols = self.last_symbols[-self.symbol_cap:]
 
+    # --------------------------------------------------------------- episodic
+    def log_event(self, tick: int, kind: str, detail: str = "") -> None:
+        self.events.append({"tick": tick, "kind": kind, "detail": detail})
+        if len(self.events) > self.event_cap:
+            self.events = self.events[-self.event_cap:]
+
+    def mark_territory(self, w: int, h: int) -> bool:
+        bx = min(TERR_COLS - 1, self.x * TERR_COLS // max(1, w))
+        by = min(TERR_ROWS - 1, self.y * TERR_ROWS // max(1, h))
+        bit = 1 << (by * TERR_COLS + bx)
+        if not (self.territory_bits & bit):
+            self.territory_bits |= bit
+            self.new_cells += 1
+            return True
+        return False
+
+    def territory_fraction(self) -> float:
+        return bin(self.territory_bits).count("1") / TERR_BLOCKS
+
+    # --------------------------------------------------------------- spotlight
+    def record_decision(self, x_in, action_code: int, confidence: float, reward: float) -> None:
+        """Only called for spotlighted agents — stores the introspection data
+        that decision traces and cognitive metrics are computed from."""
+        self.last_input = np.asarray(x_in, dtype=np.float32).copy()
+        self.last_confidence = confidence
+        if self.last_h is not None:
+            self.act_buffer.append(np.abs(self.last_h).astype(np.float32))
+            if len(self.act_buffer) > self.spot_cap:
+                self.act_buffer = self.act_buffer[-self.spot_cap:]
+        self.act_history.append(action_code)
+        if len(self.act_history) > self.spot_cap:
+            self.act_history = self.act_history[-self.spot_cap:]
+        self.reward_history.append(round(float(reward), 3))
+        if len(self.reward_history) > self.spot_cap:
+            self.reward_history = self.reward_history[-self.spot_cap:]
+
+    def clear_spotlight(self) -> None:
+        self.spotlighted = False
+        self.last_input = None
+        self.act_buffer = []
+        self.act_history = []
+        self.reward_history = []
+
+    def learning_index(self) -> float:
+        """Cheap, all-agent proxy: how far lifetime plasticity has pushed the
+        output weights away from the inherited genome."""
+        denom = float(np.linalg.norm(self.genome.w2)) + 1e-6
+        return round(float(np.linalg.norm(self.fast_w2)) / denom, 4)
+
     # --------------------------------------------------------------- persistence
     def to_state(self):
         return {
@@ -104,6 +216,16 @@ class Agent:
             "state": self.state, "trajectory": self.trajectory,
             "last_interactions": self.last_interactions, "last_symbols": self.last_symbols,
             "follow_target": self.follow_target, "follow_streak": self.follow_streak,
+            "events": self.events,
+            "atk_won": self.atk_won, "atk_lost": self.atk_lost, "dmg_dealt": self.dmg_dealt,
+            "dmg_received": self.dmg_received, "energy_from_atk": self.energy_from_atk,
+            "wounds": self.wounds, "kills": self.kills,
+            "n_moves": self.n_moves, "n_rests": self.n_rests, "n_coop": self.n_coop,
+            "n_follow": self.n_follow, "n_followed": self.n_followed,
+            "peak_energy": self.peak_energy, "territory_bits": self.territory_bits,
+            "new_cells": self.new_cells, "sym_counts": self.sym_counts,
+            "t_first_food": self.t_first_food, "t_first_attack": self.t_first_attack,
+            "t_first_repro": self.t_first_repro, "t_first_signal": self.t_first_signal,
             "memory": self.memory.to_state(), "genome": self.genome.to_state(),
         }
 
@@ -127,6 +249,27 @@ class Agent:
         a.last_symbols = [tuple(s) for s in d.get("last_symbols", [])]
         a.follow_target = d.get("follow_target", 0)
         a.follow_streak = d.get("follow_streak", 0)
+        a.events = d.get("events", [])
+        a.atk_won = d.get("atk_won", 0)
+        a.atk_lost = d.get("atk_lost", 0)
+        a.dmg_dealt = d.get("dmg_dealt", 0.0)
+        a.dmg_received = d.get("dmg_received", 0.0)
+        a.energy_from_atk = d.get("energy_from_atk", 0.0)
+        a.wounds = d.get("wounds", 0)
+        a.kills = d.get("kills", 0)
+        a.n_moves = d.get("n_moves", 0)
+        a.n_rests = d.get("n_rests", 0)
+        a.n_coop = d.get("n_coop", 0)
+        a.n_follow = d.get("n_follow", 0)
+        a.n_followed = d.get("n_followed", 0)
+        a.peak_energy = d.get("peak_energy", a.energy)
+        a.territory_bits = d.get("territory_bits", 0)
+        a.new_cells = d.get("new_cells", 0)
+        a.sym_counts = list(d.get("sym_counts", [0] * 10))
+        a.t_first_food = d.get("t_first_food", 0)
+        a.t_first_attack = d.get("t_first_attack", 0)
+        a.t_first_repro = d.get("t_first_repro", 0)
+        a.t_first_signal = d.get("t_first_signal", 0)
         a.memory.load_state(d["memory"])
         a.prev_energy = a.energy
         return a

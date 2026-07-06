@@ -53,6 +53,10 @@ CREATE INDEX IF NOT EXISTS idx_inter_tick ON interactions(tick);
 CREATE INDEX IF NOT EXISTS idx_inter_agent ON interactions(agent_id);
 CREATE INDEX IF NOT EXISTS idx_inter_type ON interactions(type);
 
+CREATE TABLE IF NOT EXISTS discoveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, tick INTEGER, kind TEXT, label TEXT
+);
+
 CREATE TABLE IF NOT EXISTS frames (
     tick INTEGER PRIMARY KEY, created REAL, data TEXT
 );
@@ -82,6 +86,7 @@ class Persistence:
         self._events: list = []
         self._milestones: list = []
         self._interactions: list = []
+        self._discoveries: list = []
         self._tick_count = 0
 
     # ------------------------------------------------------------- write side
@@ -114,6 +119,9 @@ class Persistence:
                                    ev.get("x", 0), ev.get("y", 0)))
         self._tick_count += 1
 
+    def log_discovery(self, d: dict[str, Any]):
+        self._discoveries.append((d["tick"], d.get("kind", ""), d.get("label", "")))
+
     def flush(self):
         with self._lock:
             if self._births:
@@ -142,6 +150,10 @@ class Persistence:
                     "INSERT INTO interactions (tick,agent_id,target_id,type,signal,result,"
                     "energy_delta,x,y) VALUES (?,?,?,?,?,?,?,?,?)", self._interactions)
                 self._interactions.clear()
+            if self._discoveries:
+                self.conn.executemany(
+                    "INSERT INTO discoveries (tick,kind,label) VALUES (?,?,?)", self._discoveries)
+                self._discoveries.clear()
             if self._tick_count > 400:   # bound growth periodically, not every flush
                 self.conn.execute(
                     "DELETE FROM interactions WHERE id NOT IN "
@@ -260,6 +272,43 @@ class Persistence:
         if species_map:
             rows = [r for r in rows if species_map.get(r["agent_id"]) is not None]
         return rows
+
+    def discoveries_list(self, limit=200):
+        c = self._rc()
+        try:
+            rows = c.execute("SELECT tick,kind,label FROM discoveries ORDER BY tick DESC LIMIT ?",
+                             (limit,)).fetchall()
+        finally:
+            c.close()
+        return [dict(r) for r in rows]
+
+    def descendants_count(self, agent_id: int) -> int:
+        """Total descendants ever (living or dead) via the genealogy tree."""
+        c = self._rc()
+        try:
+            row = c.execute(
+                "WITH RECURSIVE d(id) AS ("
+                "  SELECT agent_id FROM agents WHERE parent_id=?"
+                "  UNION SELECT a.agent_id FROM agents a JOIN d ON a.parent_id=d.id"
+                ") SELECT COUNT(*) FROM d", (agent_id,)).fetchone()
+        finally:
+            c.close()
+        return int(row[0]) if row else 0
+
+    def species_export(self, species_id: int) -> dict[str, Any]:
+        c = self._rc()
+        try:
+            agents = [dict(r) for r in c.execute(
+                "SELECT * FROM agents WHERE species_id=?", (species_id,)).fetchall()]
+        finally:
+            c.close()
+        for a in agents:
+            if isinstance(a.get("genes"), str):
+                try:
+                    a["genes"] = json.loads(a["genes"])
+                except Exception:
+                    pass
+        return {"species_id": species_id, "agents": agents}
 
     def frame_ticks(self):
         c = self._rc()

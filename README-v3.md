@@ -122,6 +122,72 @@ margen; si en tu Raspberry Pi ves que el "ritmo real" se queda muy por debajo
 del solicitado, baja la población máxima o usa el modo cognitivo `liviano`
 con menos agentes iniciales.
 
+## Capa de análisis cognitivo (v3.1)
+
+v3 dejó de ser un visualizador para convertirse en una **plataforma de estudio
+de comportamiento y cognición emergente**. Al seleccionar un individuo, su ficha
+ahora incluye:
+
+- **Resumen narrativo automático** en lenguaje natural (edad vs. promedio,
+  reproducción, cooperación, señales más usadas, ataques, estado actual).
+- **Memoria episódica cronológica**: "Hace N ticks → encontró comida / comió
+  (+35) / escuchó señal [7] / emitió señal [1] / atacó / fue atacado / se
+  reprodujo / descubrió territorio".
+- **Traza de decisión**: qué percibió (energía, comida, peligro, voces, vecino,
+  memoria), qué categorías de entrada pesaron más en la red, qué neuronas se
+  activaron, la acción resultante y su **confianza**.
+- **Objetivos inferidos** (con estrellas), leídos de las salidas de la red —
+  nunca programados: buscar comida/explorar, atacar/defender, reproducirse,
+  comunicar, descansar.
+- **Relaciones sociales**: por cada individuo recordado, relación
+  (aliada/hostil/neutral), veces que ayudó/atacó, confianza y hace cuánto se
+  vieron. De aquí pueden emerger alianzas y rivalidades reconocibles.
+- **Estadísticas de combate**: ataques hechos/ganados/perdidos, daño promedio,
+  energía obtenida, heridas recibidas, muertes provocadas.
+- **Historial reproductivo**: hijos, hijos vivos, nietos, descendencia total
+  (árbol genealógico completo). *(La reproducción es asexual, así que no hay
+  "parejas".)*
+- **Perfil de personalidad emergente**: agresividad, cooperación, curiosidad,
+  exploración, territorialidad, sociabilidad, dominancia — todo **calculado del
+  comportamiento histórico**, no fijado como parámetro.
+- **Fitness evolutivo** compuesto (supervivencia, descendencia, energía,
+  territorio, cooperación, combate, longevidad), no solo el número de hijos.
+- **Línea temporal** del individuo (nacimiento, primera comida, primera señal,
+  primer ataque, primera reproducción).
+- **Métricas cognitivas reales** que reemplazan la vieja "complejidad = distancia
+  a la inicial": entropía de activación, neuronas activas por decisión,
+  diversidad de activación, estabilidad de decisión, complejidad y variabilidad
+  conductual, índice de aprendizaje (cuánto movió la plasticidad los pesos) y
+  tendencia de recompensa.
+
+Además:
+
+- **Seguimiento inteligente (documental)**: al pulsar "🎯 Seguir", la cámara se
+  centra y acerca al individuo y aparece una tira en vivo con lo que **observa,
+  decide, emite** y **con quién interactúa**.
+- **Herramienta de comparación**: "⚖ Comparar" y elige un segundo individuo para
+  ver genes, edad, personalidad, fitness, descendencia, cognición y resúmenes
+  lado a lado, con el "ganador" de cada métrica resaltado.
+- **Descubrimientos automáticos** (pestaña *Descubrim.*): el sistema compara
+  ventanas temporales y detecta cambios cualitativos (nueva especie dominante,
+  giro hacia la cooperación o el conflicto, cambio de estrategia alimenticia,
+  símbolo que gana protagonismo, primera cadena de seguimiento).
+- **Exportación científica**: "⬇ Agente" descarga el JSON completo de un
+  individuo (incluidos los **pesos de su red neuronal**, memoria, eventos,
+  decisiones, genealogía); "⬇ Especie" descarga toda la especie; el botón de
+  exportar del planeta sigue dando el volcado global (agentes, interacciones,
+  series, hitos).
+
+### Rendimiento
+
+Todo esto está pensado para **cientos de agentes**: los contadores baratos
+(combate, personalidad, memoria social, eventos) se llevan para todos los
+agentes, pero la introspección cara (traza de decisión, buffers de activación,
+métricas cognitivas) **solo se registra para los agentes en foco** —el
+seleccionado, el seguido o los comparados—, un puñado como mucho. El botón
+**⚡ ligero** oculta los paneles de análisis más pesados si quieres máxima
+fluidez, y cada sección de la ficha es plegable.
+
 ## Una nota honesta sobre "significado medido"
 
 En poblaciones pequeñas o bajo mucho estrés (por ejemplo, cerca del colapso),

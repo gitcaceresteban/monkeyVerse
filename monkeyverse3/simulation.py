@@ -18,7 +18,9 @@ from typing import Any, Optional
 
 import numpy as np
 
+from . import cognition, fitness as fitnessmod, introspect, narrative, personality
 from .agent import Agent
+from .discoveries import DiscoveryEngine
 from .genome import Genome, GENE_BOUNDS
 from .interactions import classify_encounter, make_event
 from .language import CONTEXTS, LEGEND, N_SYMBOLS, SymbolStats
@@ -97,8 +99,49 @@ class Simulation:
         self.ENCOUNTER_COOLDOWN = 60   # ticks: an ongoing encounter isn't re-logged every tick
         self.SIGNAL_COOLDOWN = 20
 
+        # research layer: automatic discovery engine + the observer's spotlight.
+        # spotlight maps agent_id -> expiry_tick; only these (few) agents pay the
+        # cost of recording decision traces / activation buffers.
+        self.discoveries = DiscoveryEngine()
+        self.spotlight: dict[int, int] = {}
+        self.SPOTLIGHT_TTL = 300
+        self._out_idx = {"REST": self.OUT_REST, "ATTACK": self.OUT_ATTACK,
+                         "REPRO": self.OUT_REPRO, "SPEAK": self.OUT_SPEAK}
+        self._bucket_map = self._build_bucket_map()
+        # named input indices (for plain-language perception readings in traces)
+        near = 16 + 2 * self.S + self.P
+        density = near + 6 + self.C + self.S
+        self._idx = {
+            "energy": 0, "veg_here": 5, "danger": 15,
+            "lang_own": 16, "lang_avg": 16 + self.S, "pher": 16 + 2 * self.S,
+            "near": near, "near_dist": near + 2, "density": density,
+            "recall_food": density + 1, "recall_danger": density + 4,
+            "inv": density + 7, "diet_self": density + 8,
+        }
+
         if populate:
             self._populate()
+
+    # ---------------------------------------------------------------- labels
+    def _build_bucket_map(self) -> list[str]:
+        """Semantic category per perception input, in the exact order _perceive
+        fills them. Used to explain which *kinds* of input drove a decision."""
+        b: list[str] = ["energía", "edad", "luz", "terreno", "terreno", "comida"]
+        b += ["comida"] * 8                       # 8-neighbour vegetation
+        b += ["carne", "peligro"]
+        b += ["mi_voz"] * self.S                   # own cell language
+        b += ["voz_oída"] * self.S                 # neighbourhood language
+        b += ["feromona"] * self.P
+        b += ["vecino", "vecino", "vecino"]        # nearest dx, dy, dist
+        b += ["vecino"] * self.C                   # nearest colour
+        b += ["vecino", "vecino", "vecino"]        # diet, size, feeling
+        b += ["voz_oída"] * self.S                 # nearest agent's language
+        b += ["densidad"]
+        b += ["memoria", "memoria", "memoria"]     # food recall
+        b += ["memoria", "memoria", "memoria"]     # danger recall
+        b += ["inventario", "dieta"]
+        b += ["memoria_trabajo"] * self.M
+        return b
 
     # ---------------------------------------------------------------- populate
     def _new_genome(self):
@@ -256,13 +299,22 @@ class Simulation:
             resting = _sig(out[self.OUT_REST]) > 0.6
             a.resting = resting
             a.moved = False
-            if not resting:
+            mv = 0
+            if resting:
+                a.n_rests += 1
+            else:
                 mv = int(self.rng.choice(9, p=p))
                 a.moved = self._try_move(a, mv)
                 if a.moved and self.rng.random() < g["speed"]:
                     self._try_move(a, mv)
+                if a.moved:
+                    a.n_moves += 1
             a.push_position(a.x, a.y)
             self.world.heatmap[a.y, a.x] = min(500.0, self.world.heatmap[a.y, a.x] + 1.0)
+            if a.mark_territory(w, h) and a.age > 5:
+                a.log_event(t, "territorio", "descubrió una región nueva")
+            if a.energy > a.peak_energy:
+                a.peak_energy = a.energy
 
             # --- fleeing heuristic (observation-only label, no new behaviour) ---
             fleeing = False
@@ -308,6 +360,11 @@ class Simulation:
                     pair_logged.add(pair)
                     self._encounter_cooldown[pair] = t
                     if kind == "cooperación":
+                        a.n_coop += 1
+                        nb.n_coop += 1
+                        a.memory.note_social(nb.id, "pos", t)
+                        nb.memory.note_social(a.id, "pos", t)
+                        a.log_event(t, "cooperación", f"convivió con #{nb.id}")
                         self._milestone("first_cooperation", {"a": a.id, "b": nb.id})
                 if a.follow_target == nb.id:
                     a.follow_streak += 1
@@ -315,6 +372,11 @@ class Simulation:
                     a.follow_target = nb.id
                     a.follow_streak = 1
                 if a.follow_streak == FOLLOW_STREAK_MILESTONE:
+                    a.n_follow += 1
+                    nb.n_followed += 1
+                    a.memory.note_social(nb.id, "pos", t)
+                    a.log_event(t, "seguimiento", f"siguió a #{nb.id}")
+                    nb.log_event(t, "seguido", f"fue seguido por #{a.id}")
                     ev = make_event(t, a.id, nb.id, "seguimiento", None,
                                     "asociación sostenida", 0.0, (a.x, a.y))
                     self._push_interaction(ev, a, nb, tick_interactions)
@@ -335,11 +397,26 @@ class Simulation:
             a.learn(reward, lr, self.cfg.plasticity_decay)
             if lr > 0 and abs(reward) > 2:
                 learners += 1
-            a.memory.note_place(a.x, a.y, reward * 0.4)
+            a.memory.note_place(a.x, a.y, reward * 0.4, t)
             a.memory.decay()
 
             # --- state label (observer's classification, not a new behaviour) ---
             a.state = self._label_state(a, resting, reproduced, hit, fleeing, dens)
+
+            # --- expensive introspection: only for spotlighted (focused) agents ---
+            if a.id in self.spotlight:
+                if reproduced:
+                    action_code = 2
+                elif hit is not None:
+                    action_code = 1
+                elif resting:
+                    action_code = 0
+                elif spoke:
+                    action_code = 3
+                else:
+                    action_code = 4
+                conf = introspect.move_confidence(out)
+                a.record_decision(x_in, action_code, conf, reward)
 
             # --- migration milestone ---
             if a.age > 300:
@@ -385,6 +462,18 @@ class Simulation:
                 self.persistence and self.persistence.log_milestone(
                     {"tick": t, "kind": ev["kind"], "label": label, "data": ev})
             self._check_meaning_emergence(t)
+
+        # automatic discoveries (slow cadence, compares time windows)
+        for disc in self.discoveries.maybe_run(self):
+            self._log_event("descubrimiento", disc)
+            if self.persistence:
+                self.persistence.log_discovery(disc)
+
+        # expire spotlights so introspection cost stays bounded
+        if t % 60 == 0 and self.spotlight:
+            expired = [aid for aid, exp in self.spotlight.items() if exp < t]
+            for aid in expired:
+                del self.spotlight[aid]
 
         # interaction bookkeeping: bounded in-memory ring + persisted rolling table
         if tick_interactions:
@@ -467,6 +556,12 @@ class Simulation:
             if a.energy > self.cfg.max_energy:
                 a.inv_food = min(50.0, a.inv_food + (a.energy - self.cfg.max_energy))
                 a.energy = self.cfg.max_energy
+            if gained > 2.0:   # a meaningful meal, not a nibble
+                if a.t_first_food == 0:
+                    a.t_first_food = self.tick
+                    a.log_event(self.tick, "primera_comida", f"comió por primera vez (+{gained:.0f})")
+                else:
+                    a.log_event(self.tick, "comió", f"comió (+{gained:.0f} energía)")
         elif a.inv_food > 0 and a.energy < 0.5 * self.cfg.max_energy:
             take = min(a.inv_food, 3.0)
             a.inv_food -= take
@@ -490,12 +585,28 @@ class Simulation:
                 if killed:
                     self._pred_victims.add(o.id)
                 frac = float(np.clip(g["meat_eff"] * max(0.0, g["diet"] - 0.3), 0.0, 0.9))
-                a.energy = min(self.cfg.max_energy, a.energy + dmg * frac)
+                gain = dmg * frac
+                a.energy = min(self.cfg.max_energy, a.energy + gain)
                 if o.inv_food > 0:
                     a.inv_food = min(50.0, a.inv_food + o.inv_food)
                     o.inv_food = 0.0
-                o.memory.note_social(a.id, -1.0)
+                o.memory.note_social(a.id, "neg", self.tick)
+                # combat bookkeeping (winner = attacker; loser = defender)
                 a.n_attacks += 1
+                a.atk_won += 1
+                a.dmg_dealt += dmg
+                a.energy_from_atk += gain
+                if killed:
+                    a.kills += 1
+                if a.t_first_attack == 0:
+                    a.t_first_attack = self.tick
+                o.atk_lost += 1
+                o.dmg_received += dmg
+                o.wounds += 1
+                a.log_event(self.tick, "atacó",
+                            f"atacó a #{o.id}" + (" (lo mató)" if killed else f" (-{dmg:.0f})"))
+                o.log_event(self.tick, "fue_atacado",
+                            f"fue atacado por #{a.id} (-{dmg:.0f})")
                 self._milestone("first_predation", {"attacker": a.id, "victim": o.id})
                 ev = make_event(self.tick, a.id, o.id, "ataque", None,
                                "muerte" if killed else "herida", -dmg, (a.x, a.y))
@@ -520,6 +631,9 @@ class Simulation:
         self.world.lang[a.y, a.x, symbol] = min(6.0, self.world.lang[a.y, a.x, symbol] + 1.0)
         a.push_symbol(self.tick, symbol)
         a.n_sound += 1
+        a.sym_counts[symbol] += 1
+        if a.t_first_signal == 0:
+            a.t_first_signal = self.tick
 
         context = {
             "food_near": bool(self.world.veg[a.y, a.x] > 0.4),
@@ -547,6 +661,8 @@ class Simulation:
                     self._push_interaction(ev, a, nb, tick_bucket)
                     pair_logged.add(pair)
                     self._signal_cooldown[pair] = self.tick
+                    a.log_event(self.tick, "emitió_señal", f"emitió señal [{symbol}] {LEGEND[symbol]}")
+                    nb.log_event(self.tick, "escuchó_señal", f"escuchó señal [{symbol}] de #{a.id}")
         return True, symbol
 
     def _check_meaning_emergence(self, tick: int) -> None:
@@ -578,6 +694,9 @@ class Simulation:
                       self.cfg, species_id=sid)
         self.next_id += 1
         a.n_children += 1
+        if a.t_first_repro == 0:
+            a.t_first_repro = self.tick
+        a.log_event(self.tick, "reproducción", f"tuvo un descendiente (#{child.id})")
         self._milestone("first_reproduction", {"parent": a.id})
         ev = make_event(self.tick, a.id, child.id, "reproducción", None,
                        "nace un descendiente", -(ce + self.cfg.reproduce_overhead), (a.x, a.y))
@@ -714,29 +833,147 @@ class Simulation:
         return {"tick": self.tick, "width": self.world.w, "height": self.world.h,
                 "layers": layers, "agents": agents, "stats": self.stats_row()}
 
-    def agent_detail(self, aid):
+    # ---------------------------------------------------------------- spotlight
+    def set_spotlight(self, aid: int) -> None:
+        """Mark an agent as focused so it records decision traces / activation
+        buffers. Cheap: only these few agents pay the introspection cost."""
+        self.spotlight[aid] = self.tick + self.SPOTLIGHT_TTL
+
+    def _find(self, aid):
         for a in self.agents:
             if a.id == aid:
-                sp = self.species.species.get(a.species_id, {})
-                return {
-                    "id": int(a.id), "parent_id": int(a.parent_id),
-                    "generation": int(a.generation), "species": sp.get("name", "?"),
-                    "species_id": int(a.species_id), "age": int(a.age),
-                    "energy": round(float(a.energy), 2), "x": int(a.x), "y": int(a.y),
-                    "state": a.state, "inv_food": round(float(a.inv_food), 2),
-                    "attacks": int(a.n_attacks), "children": int(a.n_children),
-                    "fitness": int(a.n_children),
-                    "genes": {k: round(float(v), 4) for k, v in a.genome.genes.items()},
-                    "color": [round(float(c), 3) for c in a.genome.color],
-                    "known_agents": len(a.memory.social),
-                    "trajectory": [[int(px), int(py)] for px, py in a.trajectory],
-                    "last_interactions": a.last_interactions[-a.interact_cap:],
-                    "last_symbols": [{"tick": int(tt), "symbol": int(ss), "label": LEGEND.get(ss, str(ss))}
-                                     for tt, ss in a.last_symbols],
-                    "perception_radius": self.cfg.perception_radius,
-                    "brain_complexity": round(a.genome.complexity(), 4),
-                }
+                return a
         return None
+
+    def _live_descendants(self, aid: int):
+        child_map: dict[int, list[int]] = {}
+        for a in self.agents:
+            if a.parent_id:
+                child_map.setdefault(a.parent_id, []).append(a.id)
+        kids = child_map.get(aid, [])
+        grand = sum(len(child_map.get(k, [])) for k in kids)
+        return len(kids), grand
+
+    def _avg_age(self) -> float:
+        return float(np.mean([a.age for a in self.agents])) if self.agents else 0.0
+
+    # ---------------------------------------------------------------- trace
+    def _decision_trace(self, a) -> dict[str, Any]:
+        if a.last_input is None:
+            return {"available": False,
+                    "note": "Selecciona/sigue al agente unos segundos para capturar sus decisiones."}
+        x = a.last_input
+        readings = []
+        e_norm = float(x[self._idx["energy"]])
+        readings.append(("Energía", "baja" if e_norm < 0.3 else "alta" if e_norm > 0.7 else "media"))
+        veg = float(x[self._idx["veg_here"]]) + float(np.sum(x[6:14]))
+        if veg > 0.3:
+            readings.append(("Comida", "la ve cerca"))
+        if float(x[self._idx["danger"]]) > 0.1:
+            readings.append(("Peligro", "lo percibe"))
+        if float(np.sum(x[self._idx["lang_avg"]:self._idx["lang_avg"] + self.S])) > 0.1:
+            readings.append(("Señales", "escucha voces cercanas"))
+        if float(x[self._idx["near_dist"]]) > 0.2:
+            readings.append(("Vecino", "hay alguien cerca"))
+        if float(x[self._idx["recall_food"] + 2]) > 0.2:
+            readings.append(("Memoria", "recuerda comida en otra parte"))
+        return {
+            "available": True,
+            "readings": [{"label": k, "value": v} for k, v in readings],
+            "salient_inputs": introspect.salient_inputs(x, a.genome.w1, self._bucket_map),
+            "top_neurons": introspect.top_neurons(a.last_h),
+            "goals": introspect.inferred_goals(a.last_out, a.genome.genes, self._out_idx, self.S),
+            "confidence": a.last_confidence,
+            "state": a.state,
+        }
+
+    def _timeline(self, a) -> list[dict[str, Any]]:
+        marks = [{"tick": int(a.birth_tick), "label": "Nacimiento"}]
+        for t, lbl in ((a.t_first_food, "Primera comida"), (a.t_first_signal, "Primera señal"),
+                       (a.t_first_attack, "Primer ataque"), (a.t_first_repro, "Primera reproducción")):
+            if t:
+                marks.append({"tick": int(t), "label": lbl})
+        marks.sort(key=lambda m: m["tick"])
+        return marks
+
+    def agent_detail(self, aid, full: bool = True):
+        a = self._find(aid)
+        if a is None:
+            return None
+        if full:
+            self.set_spotlight(aid)
+        sp = self.species.species.get(a.species_id, {})
+        children_alive, grandchildren = self._live_descendants(aid)
+        prof = personality.profile(a)
+        fit = fitnessmod.compute(a, descendants=children_alive, grandchildren=grandchildren)
+        detail = {
+            "id": int(a.id), "parent_id": int(a.parent_id),
+            "generation": int(a.generation), "species": sp.get("name", "?"),
+            "species_id": int(a.species_id), "age": int(a.age),
+            "energy": round(float(a.energy), 2), "peak_energy": round(float(a.peak_energy), 1),
+            "x": int(a.x), "y": int(a.y), "state": a.state,
+            "inv_food": round(float(a.inv_food), 2),
+            "attacks": int(a.n_attacks), "children": int(a.n_children),
+            "genes": {k: round(float(v), 4) for k, v in a.genome.genes.items()},
+            "color": [round(float(c), 3) for c in a.genome.color],
+            "known_agents": len(a.memory.social),
+            "trajectory": [[int(px), int(py)] for px, py in a.trajectory],
+            "last_interactions": a.last_interactions[-a.interact_cap:],
+            "last_symbols": [{"tick": int(tt), "symbol": int(ss), "label": LEGEND.get(ss, str(ss))}
+                             for tt, ss in a.last_symbols],
+            "perception_radius": self.cfg.perception_radius,
+            # --- research layer ---
+            "personality": prof,
+            "fitness": fit,
+            "combat": {
+                "made": int(a.n_attacks), "won": int(a.atk_won), "lost": int(a.atk_lost),
+                "avg_damage": round(a.dmg_dealt / max(1, a.atk_won), 1),
+                "energy_gained": round(float(a.energy_from_atk), 1),
+                "wounds_received": int(a.wounds), "damage_received": round(float(a.dmg_received), 1),
+                "kills": int(a.kills),
+            },
+            "reproduction": {
+                "children": int(a.n_children), "children_alive": children_alive,
+                "grandchildren": grandchildren, "note": "reproducción asexual (sin parejas)",
+            },
+            "memory_stats": a.memory.stats(self.tick),
+            "events": list(reversed(a.events[-24:])),
+            "timeline": self._timeline(a),
+            "symbol_usage": list(a.sym_counts),
+        }
+        if full:
+            detail["decision_trace"] = self._decision_trace(a)
+            detail["cognition"] = cognition.compute(a)
+            detail["social"] = a.memory.relations(self.tick)
+            detail["narrative"] = narrative.summarize(
+                sp.get("name", "?"), int(a.age), self._avg_age(), int(a.n_children),
+                int(a.n_coop), int(a.n_attacks), a.state,
+                personality.dominant_trait(prof), a.sym_counts)
+        return detail
+
+    def compare(self, aid_a: int, aid_b: int):
+        da = self.agent_detail(aid_a, full=True)
+        db = self.agent_detail(aid_b, full=True)
+        if da is None or db is None:
+            return None
+        return {"a": da, "b": db}
+
+    def agent_export(self, aid: int):
+        """Complete scientific dump of one individual, including brain weights."""
+        a = self._find(aid)
+        if a is None:
+            return None
+        detail = self.agent_detail(aid, full=True)
+        gs = a.genome.to_state()
+        detail["brain_weights"] = {
+            "w1": gs["w1"].tolist(), "b1": gs["b1"].tolist(),
+            "w2": gs["w2"].tolist(), "b2": gs["b2"].tolist(),
+            "fast_w2": a.fast_w2.tolist(),
+        }
+        detail["memory_landmarks"] = a.memory.land.tolist()
+        detail["all_events"] = a.events
+        detail["reward_history"] = a.reward_history
+        return detail
 
     # ---------------------------------------------------------------- snapshot
     def to_snapshot(self):
@@ -750,6 +987,7 @@ class Simulation:
             "world": self.world.to_state(), "species": self.species.to_state(),
             "milestones": self.milestones.to_state(),
             "symbol_stats": self.symbol_stats.to_state(),
+            "discoveries": self.discoveries.to_state(),
             "agents": [a.to_state() for a in self.agents],
         }
 
@@ -771,4 +1009,6 @@ class Simulation:
         self.milestones.load_state(s["milestones"])
         if "symbol_stats" in s:
             self.symbol_stats.load_state(s["symbol_stats"])
+        if "discoveries" in s:
+            self.discoveries.load_state(s["discoveries"])
         self.agents = [Agent.from_state(d, self.cfg) for d in s["agents"]]

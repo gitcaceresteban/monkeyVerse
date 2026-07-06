@@ -10,6 +10,7 @@ const S = {
   selectedAgentId: null, agentDetail: null, followMode: false,
   showRadii: false, showTraj: false, soundOn: false, volume: 0.6,
   seenInteractionIds: new Set(), lastInterPoll: 0,
+  lightMode: false, compareMode: false, compareA: null,
 };
 
 async function boot() {
@@ -29,6 +30,13 @@ async function boot() {
   $("#insClose").onclick = closeInspector;
   $("#followBtn").onclick = toggleFollow;
   $("#playSymbolBtn").onclick = replayLastSymbol;
+  $("#compareBtn").onclick = startCompare;
+  $("#exportAgentBtn").onclick = exportAgent;
+  $("#exportSpeciesBtn").onclick = exportSpecies;
+  $("#compareClose").onclick = () => $("#compareBg").classList.remove("open");
+  $("#compareBg").onclick = (e) => { if (e.target.id === "compareBg") $("#compareBg").classList.remove("open"); };
+  $("#toggleLight").onclick = (e) => { S.lightMode = !S.lightMode; e.target.classList.toggle("on", S.lightMode);
+    if (S.agentDetail) renderInspector(S.agentDetail); };
   $("#refreshHist").onclick = loadHistory;
   $("#refreshInter").onclick = loadInteractions;
   $("#colorMode").onchange = (e) => { S.colorMode = e.target.value; };
@@ -298,8 +306,12 @@ function updateLive(state) {
   }).join("");
 }
 
+let _lastAgentListRender = 0;
 function updateAgentList(state) {
   if (S.tab !== "agents") return;
+  const now = Date.now();
+  if (now - _lastAgentListRender < 1000) return;   // throttle: avoid flicker/detach at high tick rates
+  _lastAgentListRender = now;
   const agents = (state.agents || []).filter((a) => a.length >= 7).slice(0, 200);
   $("#agentList").innerHTML = agents.map((a) => {
     const [x, y, hue, en, spid, diet, aid] = a;
@@ -320,6 +332,10 @@ function updateAgentList(state) {
 
 /* ---------------------------------------------------------- agent select */
 function selectAgent(aid) {
+  if (S.compareMode && S.compareA != null && aid !== S.compareA) {
+    openCompare(S.compareA, aid);
+    return;
+  }
   S.selectedAgentId = aid;
   $("#inspector").classList.add("show");
   refreshAgentDetail();
@@ -337,29 +353,201 @@ async function refreshAgentDetail() {
   if (!d.live) return;
   renderInspector(d);
 }
+const PBAR_COLOR = {
+  agresividad: "#ff6b6b", cooperación: "#46d6a6", curiosidad: "#5fa0ff",
+  exploración: "#b98bff", territorialidad: "#ffcf5c", sociabilidad: "#46d6a6", dominancia: "#ff9f5c",
+};
+function stars(n) { return "★★★★★".slice(0, n) + "☆☆☆☆☆".slice(0, 5 - n); }
+function sec(title, inner, open) {
+  return `<details class="insec" ${open ? "open" : ""}><summary>${title}</summary><div class="body">${inner}</div></details>`;
+}
+
 function renderInspector(d) {
   const a = d.live;
+  const tick = S.state?.tick ?? 0;
   $("#insTitle").textContent = `#${a.id} · ${a.species}`;
-  const genesRows = ["metabolism", "diet", "size", "vision", "speed", "max_age"]
-    .map((k) => `<div class="row">${k} <b>${a.genes[k].toFixed(2)}</b></div>`).join("");
-  const lastInter = (a.last_interactions || []).slice(-4).reverse()
-    .map((e) => `<div class="row">${e.type} → ${e.target_id ?? "-"} <b>${e.result || ""}</b></div>`).join("")
-    || '<div class="row">sin interacciones aún</div>';
-  const lastSym = (a.last_symbols || []).slice(-5).reverse()
-    .map((s) => `<span class="symbol-chip"><b>${s.symbol}</b> ${s.label}</span>`).join("") || "—";
-  $("#insBody").innerHTML = `
-    <div class="row">Estado <b>${a.state}</b></div>
-    <div class="row">Edad <b>${a.age}</b></div>
-    <div class="row">Energía <b>${a.energy}</b></div>
-    <div class="row">Generación <b>${a.generation}</b></div>
-    <div class="row">Posición <b>${a.x}, ${a.y}</b></div>
-    <div class="row">Hijos (fitness) <b>${a.fitness}</b></div>
-    <div class="row">Ataques <b>${a.attacks}</b></div>
-    <div class="row">Conoce a <b>${a.known_agents}</b> individuos</div>
-    <div class="mini-h">Genes</div>${genesRows}
-    <div class="mini-h">Últimas interacciones</div>${lastInter}
-    <div class="mini-h">Últimos sonidos</div>${lastSym}
-  `;
+  let html = "";
+
+  // header
+  html += `<div class="kv">Estado <b>${a.state}</b></div>
+    <div class="kv">Edad <b>${a.age}</b></div>
+    <div class="kv">Energía <b>${a.energy}</b> <span style="color:var(--muted)">(pico ${a.peak_energy})</span></div>
+    <div class="kv">Generación <b>${a.generation}</b></div>
+    <div class="kv">Posición <b>${a.x}, ${a.y}</b></div>`;
+
+  // documentary strip when following
+  if (S.followMode && d.live.decision_trace?.available) {
+    const dt = d.live.decision_trace;
+    const goal = dt.goals[0];
+    const obs = dt.readings.map((r) => `${r.label}: ${r.value}`).join(" · ") || "—";
+    const lastSym = (a.last_symbols || []).slice(-1)[0];
+    const lastInt = (a.last_interactions || []).slice(-1)[0];
+    html += `<div class="docstrip">
+      <div class="dl">Observa</div><div class="dv">${obs}</div>
+      <div class="dl">Decide</div><div class="dv">${goal.goal} · confianza ${dt.confidence}%</div>
+      <div class="dl">Emite</div><div class="dv">${lastSym ? `[${lastSym.symbol}] ${lastSym.label}` : "—"}</div>
+      <div class="dl">Interactúa</div><div class="dv">${lastInt ? `${lastInt.type} → #${lastInt.target_id ?? "-"}` : "—"}</div>
+    </div>`;
+  }
+
+  // narrative
+  if (d.live.narrative) html += `<div class="narr">${d.live.narrative}</div>`;
+
+  // fitness
+  const fit = a.fitness;
+  html += sec("Fitness evolutivo", `
+    <div style="text-align:center;margin:4px 0"><span class="fitbig">${fit.score}</span>
+      <span style="color:var(--muted)">/100</span></div>
+    ${Object.entries(fit.breakdown).map(([k, v]) =>
+      `<div class="pbar"><span class="lbl">${k}</span><span class="bar"><div style="width:${v}%;background:var(--accent)"></div></span><span class="val">${v|0}</span></div>`).join("")}
+  `, true);
+
+  // inferred goals + decision trace (heavy — hidden in light mode)
+  if (!S.lightMode && d.live.decision_trace) {
+    const dt = d.live.decision_trace;
+    if (dt.available) {
+      const goals = dt.goals.map((g) =>
+        `<div class="goal"><span class="stars">${stars(g.stars)}</span><span class="nm">${g.goal}</span></div>`).join("");
+      const reads = dt.readings.map((r) => `<span class="trace-read"><b>${r.label}:</b> ${r.value}</span>`).join("");
+      const salient = dt.salient_inputs.map((s) => `<span class="trace-read">${s.input} <b>${(s.weight*100)|0}%</b></span>`).join("");
+      const neurons = dt.top_neurons.map((n) => `n${n.neuron}:${n.activation}`).join("  ");
+      html += sec("Objetivos inferidos", goals, true);
+      html += sec("Traza de decisión", `
+        <div class="mini-h">Entrada</div><div>${reads}</div>
+        <div class="mini-h">Qué pesó más</div><div>${salient}</div>
+        <div class="mini-h">Neuronas más activas</div><div style="color:var(--muted);font-size:10px">${neurons}</div>
+        <div class="kv" style="margin-top:6px">Confianza <b>${dt.confidence}%</b></div>`, true);
+    } else {
+      html += sec("Traza de decisión", `<div style="color:var(--muted);font-size:10.5px">${dt.note}</div>`, false);
+    }
+  }
+
+  // personality
+  const pr = a.personality;
+  html += sec("Personalidad emergente", Object.entries(pr).map(([k, v]) =>
+    `<div class="pbar"><span class="lbl">${k}</span><span class="bar"><div style="width:${v}%;background:${PBAR_COLOR[k]||'#5fa0ff'}"></div></span><span class="val">${v}</span></div>`).join(""), true);
+
+  // combat
+  const c = a.combat;
+  html += sec("Combate", `
+    <div class="kv">Ataques realizados <b>${c.made}</b></div>
+    <div class="kv">Ganados <b>${c.won}</b></div>
+    <div class="kv">Perdidos <b>${c.lost}</b></div>
+    <div class="kv">Daño promedio <b>${c.avg_damage}</b></div>
+    <div class="kv">Energía obtenida <b>${c.energy_gained}</b></div>
+    <div class="kv">Heridas recibidas <b>${c.wounds_received}</b></div>
+    <div class="kv">Muertes provocadas <b>${c.kills}</b></div>`, false);
+
+  // reproduction
+  const rp = a.reproduction;
+  html += sec("Historial reproductivo", `
+    <div class="kv">Hijos <b>${rp.children}</b></div>
+    <div class="kv">Hijos vivos <b>${rp.children_alive}</b></div>
+    <div class="kv">Nietos <b>${rp.grandchildren}</b></div>
+    <div class="kv">Descendencia total <b>${rp.total_descendants ?? "…"}</b></div>
+    <div style="color:var(--muted);font-size:10px;margin-top:4px">${rp.note}</div>`, false);
+
+  // social relations
+  if (!S.lightMode && d.live.social) {
+    const rel = d.live.social;
+    const relColor = { aliada: "var(--accent)", hostil: "var(--danger)", neutral: "var(--muted)" };
+    html += sec(`Relaciones sociales (${a.known_agents})`, rel.length ? rel.map((r) =>
+      `<div class="kv">#${r.agent_id} <span style="color:${relColor[r.relation]}">${r.relation}</span>
+        <b>ayudó ${r.helped} · atacó ${r.attacked} · conf ${r.trust}</b></div>`).join("")
+      : '<div style="color:var(--muted);font-size:10.5px">Aún no recuerda a nadie.</div>', false);
+  }
+
+  // episodic memory
+  const evs = a.events || [];
+  html += sec("Memoria episódica", evs.length ? evs.map((e) =>
+    `<div class="evrow"><span class="ago">Hace ${fmt(Math.max(0, tick - e.tick))} ticks</span><span class="txt">→ ${e.detail || e.kind}</span></div>`).join("")
+    : '<div style="color:var(--muted);font-size:10.5px">Sin eventos memorables aún.</div>', false);
+
+  // memory stats
+  const ms = a.memory_stats;
+  html += sec("Estadísticas de memoria", `
+    <div class="kv">Recuerdos almacenados <b>${ms.stored_now}/${ms.capacity}</b></div>
+    <div class="kv">Guardados (total) <b>${ms.total_stored}</b></div>
+    <div class="kv">Olvidados <b>${ms.total_forgotten}</b></div>
+    <div class="kv">Antigüedad media <b>${ms.avg_memory_age} ticks</b></div>
+    <div class="kv">Individuos recordados <b>${ms.individuals_known}</b></div>`, false);
+
+  // cognition (heavy)
+  if (!S.lightMode && d.live.cognition) {
+    const cg = d.live.cognition;
+    const row = (k, v) => `<div class="kv">${k} <b>${v ?? "—"}</b></div>`;
+    html += sec("Métricas cognitivas", `
+      ${row("Muestras", cg.samples)}
+      ${row("Entropía de activación", cg.activation_entropy)}
+      ${row("Neuronas activas/decisión", cg.active_neurons)}
+      ${row("Diversidad de activación", cg.activation_diversity)}
+      ${row("Estabilidad de decisión", cg.decision_stability)}
+      ${row("Complejidad conductual", cg.behavioral_complexity)}
+      ${row("Variabilidad conductual", cg.behavioral_variability)}
+      ${row("Índice de aprendizaje", cg.learning_index)}
+      ${row("Tendencia de recompensa", cg.reward_trend)}`, false);
+  }
+
+  // timeline
+  const tl = a.timeline || [];
+  html += sec("Línea temporal", tl.map((m) =>
+    `<div class="evrow"><span class="ago">t ${fmt(m.tick)}</span><span class="txt">${m.label}</span></div>`).join(""), false);
+
+  // genes
+  html += sec("Genes", ["metabolism", "diet", "size", "vision", "speed", "max_age", "agg_bias", "explore_bias"]
+    .map((k) => `<div class="kv">${k} <b>${a.genes[k].toFixed(2)}</b></div>`).join(""), false);
+
+  $("#insBody").innerHTML = html;
+}
+
+/* ---------------------------------------------------------- compare */
+function startCompare() {
+  if (S.selectedAgentId == null) return;
+  S.compareMode = true; S.compareA = S.selectedAgentId;
+  $("#compareBtn").classList.add("on");
+  alert("Modo comparar activado. Elige un segundo individuo (clic en el mapa o en la lista de Agentes).");
+}
+async function openCompare(a, b) {
+  S.compareMode = false; $("#compareBtn").classList.remove("on");
+  let d; try { d = await api(`/api/simulations/${S.current}/compare?a=${a}&b=${b}`); } catch (e) { return; }
+  const A = d.a, B = d.b;
+  const rows = [
+    ["Especie", A.species, B.species],
+    ["Edad", A.age, B.age],
+    ["Generación", A.generation, B.generation],
+    ["Energía", A.energy, B.energy],
+    ["Fitness", A.fitness.score, B.fitness.score],
+    ["Hijos", A.children, B.children],
+    ["Descendencia total", A.reproduction.total_descendants ?? "—", B.reproduction.total_descendants ?? "—"],
+    ["Ataques ganados", A.combat.won, B.combat.won],
+    ["Muertes provocadas", A.combat.kills, B.combat.kills],
+    ["Agresividad", A.personality.agresividad, B.personality.agresividad],
+    ["Cooperación", A.personality.cooperación, B.personality.cooperación],
+    ["Curiosidad", A.personality.curiosidad, B.personality.curiosidad],
+    ["Individuos recordados", A.memory_stats.individuals_known, B.memory_stats.individuals_known],
+    ["Índice aprendizaje", A.cognition?.learning_index ?? "—", B.cognition?.learning_index ?? "—"],
+    ["Complejidad conductual", A.cognition?.behavioral_complexity ?? "—", B.cognition?.behavioral_complexity ?? "—"],
+  ];
+  const body = `<table class="cmp"><tr><th>Métrica</th><th>#${A.id} ${A.species}</th><th>#${B.id} ${B.species}</th></tr>
+    ${rows.map(([m, x, y]) => {
+      const nx = parseFloat(x), ny = parseFloat(y);
+      const xw = (!isNaN(nx) && !isNaN(ny) && nx > ny) ? "win" : "";
+      const yw = (!isNaN(nx) && !isNaN(ny) && ny > nx) ? "win" : "";
+      return `<tr><td class="metric">${m}</td><td class="${xw}"><b>${x}</b></td><td class="${yw}"><b>${y}</b></td></tr>`;
+    }).join("")}</table>
+    <div style="margin-top:10px"><div class="mini-h" style="color:var(--muted);font-size:10px">Resumen #${A.id}</div>
+      <div class="narr">${A.narrative || ""}</div>
+      <div class="mini-h" style="color:var(--muted);font-size:10px">Resumen #${B.id}</div>
+      <div class="narr">${B.narrative || ""}</div></div>`;
+  $("#compareBody").innerHTML = body;
+  $("#compareBg").classList.add("open");
+}
+function exportAgent() {
+  if (S.selectedAgentId != null) window.open(`/api/simulations/${S.current}/agent/${S.selectedAgentId}/export.json`, "_blank");
+}
+function exportSpecies() {
+  const sp = S.agentDetail?.live?.species_id;
+  if (sp != null) window.open(`/api/simulations/${S.current}/species/${sp}/export.json`, "_blank");
 }
 function toggleFollow() {
   S.followMode = !S.followMode;
@@ -483,9 +671,19 @@ function refreshTabData() {
   if (S.tab === "agents" && S.state) updateAgentList(S.state);
   if (S.tab === "interactions") loadInteractions();
   if (S.tab === "language") loadLanguage();
+  if (S.tab === "discoveries") loadDiscoveries();
   if (S.tab === "brains") loadBrains();
   if (S.tab === "history") loadHistory();
   if (S.tab === "live" && S.state) updateLive(S.state);
+}
+const DISC_ICON = { especie_dominante: "👑", estrategia_alimenticia: "🍖", cooperación: "🤝",
+  agresividad: "⚔️", lenguaje: "💬", cadena_seguimiento: "🐜" };
+async function loadDiscoveries() {
+  if (!S.current) return;
+  let d; try { d = await api(`/api/simulations/${S.current}/discoveries?limit=200`); } catch (e) { return; }
+  $("#discoveryList").innerHTML = d.map((x) =>
+    `<div class="disc-row"><span class="t">t ${fmt(x.tick)}</span><span class="ic">${DISC_ICON[x.kind] || "✨"}</span><span>${x.label}</span></div>`).join("")
+    || '<div style="color:var(--muted)">Aún no hay descubrimientos. Aparecerán a medida que el planeta cambie.</div>';
 }
 async function loadSpecies() {
   if (!S.current) return;

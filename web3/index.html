@@ -36,11 +36,14 @@
       </div>
       <div class="inspector" id="inspector">
         <h4><span id="insTitle">Individuo</span><span class="close" id="insClose">✕</span></h4>
-        <div id="insBody"></div>
         <div class="actions">
           <button class="btn small toggle" id="followBtn">🎯 Seguir</button>
-          <button class="btn small ghost" id="playSymbolBtn">🔊 Repetir sonido</button>
+          <button class="btn small ghost" id="playSymbolBtn">🔊 Sonido</button>
+          <button class="btn small ghost" id="compareBtn">⚖ Comparar</button>
+          <button class="btn small ghost" id="exportAgentBtn">⬇ Agente</button>
+          <button class="btn small ghost" id="exportSpeciesBtn">⬇ Especie</button>
         </div>
+        <div id="insBody"></div>
       </div>
     </div>
 
@@ -63,6 +66,7 @@
       <button class="btn small toggle" id="toggleTraj">〰 trayectorias</button>
       <button class="btn small toggle" id="toggleSound">🔊 sonido</button>
       <input type="range" id="volume" min="0" max="100" value="60" style="width:70px">
+      <button class="btn small toggle" id="toggleLight" title="Modo ligero: oculta los paneles de análisis pesados">⚡ ligero</button>
       <div class="sep"></div>
       <button class="btn small tool" data-tool="food">🍃 sembrar</button>
       <button class="btn small tool" data-tool="rain">🌧️ lluvia</button>
@@ -88,6 +92,7 @@
       <button data-tab="agents">Agentes</button>
       <button data-tab="interactions">Interacciones</button>
       <button data-tab="language">Lenguaje</button>
+      <button data-tab="discoveries">Descubrim.</button>
       <button data-tab="brains">Cerebros</button>
       <button data-tab="history">Historia</button>
     </div>
@@ -141,6 +146,17 @@
       <div id="langAssoc"></div>
     </div>
 
+    <div class="tabpane" id="tab-discoveries">
+      <div class="section-h">Descubrimientos automáticos</div>
+      <p style="color:var(--muted);font-size:10.5px;margin:0 0 8px">
+        El sistema compara ventanas temporales y detecta cambios cualitativos:
+        nuevas especies dominantes, giros hacia la cooperación o el conflicto,
+        cambios de estrategia alimenticia, símbolos que ganan protagonismo,
+        primeras cadenas de seguimiento.
+      </p>
+      <div id="discoveryList"></div>
+    </div>
+
     <div class="tabpane" id="tab-brains">
       <div class="section-h">Complejidad de cerebro por especie</div>
       <p style="color:var(--muted);font-size:10.5px;margin:0 0 8px">
@@ -176,6 +192,17 @@
     </div>
   </div>
 </div>
+
+<div class="modal-bg" id="compareBg">
+  <div class="modal" style="width:min(880px,96vw)">
+    <h2>Comparar individuos</h2>
+    <div id="compareBody"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="compareClose">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script src="/audio.js"></script>
 <script src="/app.js"></script>
 </body>
