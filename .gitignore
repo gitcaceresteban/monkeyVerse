@@ -2,6 +2,7 @@
 data/
 data2/
 data3/
+data4/
 *.db
 *.db-wal
 *.db-shm

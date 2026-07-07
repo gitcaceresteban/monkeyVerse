@@ -1,0 +1,119 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>monkeyVerse v4 · Isla Simple</title>
+<link rel="stylesheet" href="style.css">
+
+<div id="app">
+  <!-- ---------------------------------------------------------------- topbar -->
+  <header id="topbar">
+    <div class="brand">🐒 <b>Isla Simple</b> <span class="ver">v4</span></div>
+
+    <div class="metrics" id="metrics">
+      <span class="m" title="tick">⏱ <b id="m-tick">0</b></span>
+      <span class="m" title="población">👥 <b id="m-pop">0</b></span>
+      <span class="m sexA" title="tipo A">A <b id="m-a">0</b></span>
+      <span class="m sexB" title="tipo B">B <b id="m-b">0</b></span>
+      <span class="m" title="nacimientos">🐣 <b id="m-births">0</b></span>
+      <span class="m" title="muertes">💀 <b id="m-deaths">0</b></span>
+      <span class="m" title="reproducciones">❤ <b id="m-repro">0</b></span>
+      <span class="m" title="vegetación">🌿 <b id="m-veg">0</b></span>
+      <span class="m" title="interacciones/intervalo">🤝 <b id="m-int">0</b></span>
+      <span class="m" title="sonidos/intervalo">🔊 <b id="m-snd">0</b></span>
+      <span class="m" title="diversidad de sonidos">H <b id="m-div">0</b></span>
+    </div>
+
+    <div class="controls">
+      <div class="speeds" id="speeds"></div>
+      <label class="chk"><input type="checkbox" id="audio-on"> 🔈</label>
+      <label class="chk"><input type="checkbox" id="debug-on"> 🐞</label>
+      <button id="btn-reset" title="Reiniciar isla con la misma configuración">↺ Reiniciar</button>
+      <button id="btn-new" title="Nueva isla">＋ Nueva</button>
+      <button id="btn-export" title="Exportar">⬇ Exportar</button>
+    </div>
+  </header>
+
+  <!-- ---------------------------------------------------------------- main -->
+  <div id="main">
+    <section id="stage">
+      <canvas id="canvas"></canvas>
+      <div id="stage-hint">Haz clic en un agente para seleccionarlo y seguirlo.</div>
+      <div id="follow-badge" class="hidden">🎥 Siguiendo <b id="follow-id"></b>
+        <button id="btn-unfollow">✕</button></div>
+    </section>
+
+    <!-- ------------------------------------------------------------ sidebar -->
+    <aside id="sidebar">
+      <nav id="tabs">
+        <button data-tab="agent" class="active">Agente</button>
+        <button data-tab="comm">Comunicación</button>
+        <button data-tab="repro">Reproducción</button>
+        <button data-tab="analysis">Análisis</button>
+      </nav>
+
+      <!-- agent tab -->
+      <div class="tab active" id="tab-agent">
+        <div id="agent-empty" class="empty">Ningún agente seleccionado.<br>
+          Haz clic en uno en el mapa.</div>
+        <div id="agent-body" class="hidden"></div>
+      </div>
+
+      <!-- communication tab -->
+      <div class="tab" id="tab-comm">
+        <div class="hint">Los sonidos 0–9 empiezan <b>sin significado</b>. Aquí sólo se
+          <i>mide</i> cómo se usan; un significado sólo se marca si hay evidencia
+          estadística (frecuencia alta y por encima de la base).</div>
+        <div id="comm-body"></div>
+      </div>
+
+      <!-- reproduction tab -->
+      <div class="tab" id="tab-repro">
+        <div id="repro-body"></div>
+      </div>
+
+      <!-- analysis tab -->
+      <div class="tab" id="tab-analysis">
+        <div class="hint">Lectura automática del mundo. Sólo afirma lo que los datos
+          sostienen.</div>
+        <div id="analysis-body"></div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ---------------------------------------------------------------- legend -->
+  <div id="legend">
+    <span><i class="dot land"></i> tierra</span>
+    <span><i class="dot water"></i> agua</span>
+    <span><i class="dot veg"></i> vegetación</span>
+    <span><i class="dot a"></i> tipo A</span>
+    <span><i class="dot b"></i> tipo B</span>
+    <span><i class="dot link"></i> interacción</span>
+  </div>
+</div>
+
+<!-- --------------------------------------------------------------- new-island -->
+<div id="modal" class="hidden">
+  <div class="modal-card">
+    <h2>Nueva isla</h2>
+    <form id="new-form"><div id="form-fields"></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-cancel">Cancelar</button>
+        <button type="submit">Crear</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- --------------------------------------------------------------- export ---->
+<div id="export-menu" class="hidden">
+  <div class="menu-inner">
+    <b>Exportar</b>
+    <a id="x-run" href="#">Run completo (JSON)</a>
+    <a id="x-events" href="#">Eventos (CSV)</a>
+    <a id="x-metrics" href="#">Métricas (CSV)</a>
+    <a id="x-gen" href="#">Genealogía (JSON)</a>
+    <a id="x-living" href="#">Agentes vivos (JSON)</a>
+  </div>
+</div>
+
+<script src="audio.js"></script>
+<script src="app.js"></script>

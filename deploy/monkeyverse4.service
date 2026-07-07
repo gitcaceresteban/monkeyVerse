@@ -1,0 +1,21 @@
+[Unit]
+Description=monkeyVerse v4 — Isla Simple (slow, observable island of 20 agents)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/monkeyVerse
+Environment=HOST=0.0.0.0
+# 8003: v1's unit (monkeyverse.service) owns 8000, v2's owns 8001, v3's owns 8002.
+Environment=PORT=8003
+Environment=MONKEYVERSE_DATA=/home/pi/monkeyVerse/data4
+ExecStart=/home/pi/monkeyVerse/.venv/bin/python /home/pi/monkeyVerse/main4.py
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

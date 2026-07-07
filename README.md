@@ -17,6 +17,19 @@ formación de grupos, la territorialidad, la cooperación o la competencia.
 
 ---
 
+## Versiones
+
+Cada versión vive en su propia rama y su propio puerto, sin pisarse:
+
+| Versión | Puerto | Qué es | Detalle |
+|--------|--------|--------|---------|
+| **v1** | 8000 | El ecosistema base 24/7 | este README |
+| **v2** | 8001 | Planeta vivo (clima, especies, catástrofes, línea de tiempo) | [README-v2.md](README-v2.md) |
+| **v3** | 8002 | Planeta **observable** (seguir individuos, lenguaje, cognición) | [README-v3.md](README-v3.md) |
+| **v4** | 8003 | **Isla Simple**: pequeña, lenta y muy observable — 20 agentes, sonidos sin significado impuesto, reproducción A+B con requisitos | [README-v4.md](README-v4.md) |
+
+---
+
 ## ¿Qué es cada individuo?
 
 Cada agente tiene únicamente las capacidades mínimas para existir:
