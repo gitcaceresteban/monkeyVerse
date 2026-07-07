@@ -20,9 +20,10 @@ def _name(sid: int, rng: np.random.Generator) -> str:
 
 
 class SpeciesRegistry:
-    def __init__(self, threshold: float, rng: np.random.Generator):
+    def __init__(self, threshold: float, rng: np.random.Generator, min_members: int = 3):
         self.threshold = threshold
         self.rng = rng
+        self.min_members = max(1, min_members)
         self.species: dict[int, dict[str, Any]] = {}
         self.next_id = 1
 
@@ -80,9 +81,12 @@ class SpeciesRegistry:
         return events
 
     def living(self) -> list[dict[str, Any]]:
+        """Established species only: a lineage counts once it has at least
+        `min_members` living individuals, so the count reflects real, persistent
+        species rather than every transient one-off genetic drift."""
         out = []
         for sp in self.species.values():
-            if sp["pop"] > 0:
+            if sp["pop"] >= self.min_members:
                 out.append({"id": sp["id"], "name": sp["name"], "pop": sp["pop"],
                             "color": sp["color"], "parent": sp["parent"],
                             "founded_tick": sp["founded_tick"],

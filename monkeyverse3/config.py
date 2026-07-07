@@ -37,26 +37,25 @@ class SimConfig:
     erosion_rate: float = 0.0006
 
     # --- life ---------------------------------------------------------------
-    initial_population: int = 110
-    max_population: int = 300         # hard cap; clamped to <=100 in "avanzado" mode.
-                                       # Kept lower than v2's 550: richer per-agent
-                                       # perception/interaction bookkeeping costs more
-                                       # CPU per tick, and the whole point of v3 is a
-                                       # real-time tick_rate that's actually sustained.
+    initial_population: int = 80      # lower start so a harsh terrain isn't overgrazed at once
+    max_population: int = 240         # hard cap; clamped to <=100 in "avanzado" mode.
+                                       # Kept modest: richer per-agent perception/interaction
+                                       # bookkeeping costs CPU, and v3's point is a real-time
+                                       # tick_rate that's actually sustained.
     min_population: int = 10          # abiogenesis floor (0 = allow extinction)
-    initial_energy: float = 80.0
+    initial_energy: float = 90.0
     max_energy: float = 240.0
     founder_species: int = 2
 
     # --- vegetation / resources --------------------------------------------
-    veg_regen: float = 0.024
+    veg_regen: float = 0.032         # faster regrowth -> resilient to grazing, no famine collapse
     veg_capacity: float = 1.0
-    food_energy: float = 8.0
+    food_energy: float = 9.0         # richer plants -> carrying capacity stays above the reseed floor
     meat_energy: float = 10.0
     corpse_decay: float = 0.014
 
     # --- metabolism ---------------------------------------------------------
-    base_metabolism: float = 0.45
+    base_metabolism: float = 0.43
     move_cost: float = 0.13
     rest_recovery: float = 0.4
     max_intake: float = 0.7
@@ -64,6 +63,12 @@ class SimConfig:
     attack_cost: float = 1.5
     reproduce_overhead: float = 5.0
     founder_diet_max: float = 0.35
+    # crowding: reproduction is suppressed where the local neighbourhood is packed.
+    # This is an environmental constraint (crowding stress), not a decision the
+    # agent makes — its job is to give the ecosystem *early* negative feedback so
+    # populations approach carrying capacity smoothly instead of overshooting the
+    # food supply and collapsing to near-extinction in violent boom/bust cycles.
+    repro_crowd_limit: int = 6        # 0 = disabled
 
     # --- climate & weather --------------------------------------------------
     day_length: int = 240
@@ -97,7 +102,13 @@ class SimConfig:
     plasticity_decay: float = 0.004
     initial_mutation_rate: float = 0.09
     weight_mutation_scale: float = 0.16
-    species_threshold: float = 0.32
+    species_threshold: float = 0.5     # genetic distance to split a species (higher = fewer)
+    species_min_members: int = 3       # a lineage only counts as a species once this many are alive
+    # Pure emergence: when False, NOTHING biases an agent's decisions — every
+    # move/attack/signal comes only from its randomly-initialised brain shaped by
+    # evolution and lifetime learning. When True, two innate "temperament" genes
+    # (agg_bias, explore_bias) are added on top of the brain's outputs.
+    innate_biases: bool = False
 
     # --- runtime: fixed real-time pacing ---------------------------------------
     tick_rate: float = 8.0            # ticks per second, wall-clock. Not a "speed" dial.
@@ -127,7 +138,12 @@ class SimConfig:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "SimConfig":
         fields = {f.name for f in dataclasses.fields(cls)}
-        return cls(**{k: v for k, v in (d or {}).items() if k in fields})
+        clean = {k: v for k, v in (d or {}).items() if k in fields}
+        # coerce the bool-from-select field ("sí"/"no" from the menu). Note bool("no")
+        # is truthy, so a plain cast would be wrong — parse the string explicitly.
+        if "innate_biases" in clean and isinstance(clean["innate_biases"], str):
+            clean["innate_biases"] = clean["innate_biases"].strip().lower() in ("sí", "si", "true", "1", "yes")
+        return cls(**clean)
 
 
 CONFIG_SCHEMA: list[dict[str, Any]] = [
@@ -151,12 +167,14 @@ CONFIG_SCHEMA: list[dict[str, Any]] = [
      "help": "Si baja de aquí aparece vida nueva. 0 = permitir la extinción."},
     {"key": "founder_species", "label": "Especies fundadoras", "type": "int", "default": 2, "min": 1, "max": 12,
      "help": "Linajes distintos al comienzo. Pueden divergir en más especies."},
-    {"key": "food_energy", "label": "Energía por planta", "type": "float", "default": 8.0, "min": 1, "max": 40,
+    {"key": "food_energy", "label": "Energía por planta", "type": "float", "default": 9.0, "min": 1, "max": 40,
      "step": 0.5, "help": "Regula la economía vegetal (herbívoros)."},
     {"key": "meat_energy", "label": "Energía por carne", "type": "float", "default": 10.0, "min": 1, "max": 60,
      "step": 0.5, "help": "Alimento de depredadores y carroñeros."},
-    {"key": "base_metabolism", "label": "Metabolismo base", "type": "float", "default": 0.45, "min": 0.05, "max": 2.0,
+    {"key": "base_metabolism", "label": "Metabolismo base", "type": "float", "default": 0.43, "min": 0.05, "max": 2.0,
      "step": 0.01, "help": "Energía que cuesta existir. Sube la presión de escasez."},
+    {"key": "innate_biases", "label": "Sesgos innatos", "type": "select", "default": "no", "options": ["no", "sí"],
+     "help": "No = pura emergencia: cada decisión viene solo del cerebro que evoluciona y aprende. Sí = añade dos genes de temperamento sobre las salidas."},
     {"key": "day_length", "label": "Duración del día", "type": "int", "default": 240, "min": 0, "max": 4000,
      "help": "Ticks por ciclo día-noche. 0 = siempre de día."},
     {"key": "season_length", "label": "Duración de estación", "type": "int", "default": 6000, "min": 0, "max": 100000},
@@ -177,8 +195,8 @@ CONFIG_SCHEMA: list[dict[str, Any]] = [
      "step": 0.01, "help": "Plasticidad guiada por recompensa. 0 = solo evolución."},
     {"key": "initial_mutation_rate", "label": "Tasa de mutación", "type": "float", "default": 0.09, "min": 0.0, "max": 0.5,
      "step": 0.01},
-    {"key": "species_threshold", "label": "Umbral de especiación", "type": "float", "default": 0.32, "min": 0.05, "max": 0.9,
-     "step": 0.01, "help": "Distancia genética que hace nacer una nueva especie."},
+    {"key": "species_threshold", "label": "Umbral de especiación", "type": "float", "default": 0.5, "min": 0.05, "max": 0.9,
+     "step": 0.01, "help": "Distancia genética que hace nacer una nueva especie (más alto = menos especies)."},
     {"key": "tick_rate", "label": "Ritmo (ticks/seg, tiempo real)", "type": "float", "default": 8.0, "min": 2, "max": 15,
      "step": 0.5, "help": "Ritmo fijo en tiempo real. No es un acelerador: es el pulso del planeta."},
 ]

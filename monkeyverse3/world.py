@@ -24,7 +24,9 @@ class World:
         self.water_prox = self._blur(self.terrain.water.astype(np.float32), 4)
 
         cap = self._effective_capacity(1.0, 1.0)
-        self.veg = (cap * rng.uniform(0.2, 0.6, cap.shape)).astype(np.float32)
+        # start vegetation nearly full: an initial food buffer so the founding
+        # population can establish before growth has to keep pace with grazing.
+        self.veg = (cap * rng.uniform(0.55, 1.0, cap.shape)).astype(np.float32)
 
         self.pher = np.zeros((self.h, self.w, max(0, cfg.pheromone_channels)), dtype=np.float32)
         # the spoken language: one decaying count per digit 0-9, per cell

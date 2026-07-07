@@ -188,6 +188,38 @@ seleccionado, el seguido o los comparados—, un puñado como mucho. El botón
 **⚡ ligero** oculta los paneles de análisis más pesados si quieres máxima
 fluidez, y cada sección de la ficha es plegable.
 
+## Estabilidad y emergencia pura (ajustes v3.2)
+
+Tras observar colapsos poblacionales muy bruscos (la población pasaba de ~240 a
+~10 una y otra vez, un ciclo de sobreexplotación → hambruna → reseed), se
+ajustó el equilibrio para que las poblaciones **se establezcan y se mantengan**
+en lugar de estrellarse:
+
+- Vegetación más resiliente (regeneración y valor nutritivo mayores) y buffer de
+  comida al inicio, de modo que la capacidad de carga queda holgadamente por
+  encima del suelo de génesis en cualquier terreno.
+- Población inicial más baja (para no sobreexplotar un terreno pobre de golpe) y
+  tope por defecto de 240.
+- Umbral de especiación más alto (0.5) y una especie solo cuenta como tal cuando
+  tiene ≥3 individuos vivos: así el número de especies refleja linajes reales y
+  persistentes, en vez de dispararse a cientos por deriva genética.
+
+En pruebas (varias semillas), la población ahora se establece en ~1.000 ticks y
+se mantiene estable cerca del tope, con fluctuaciones suaves por clima y
+desastres, sin volver a colapsar a casi cero.
+
+### Emergencia pura (sin sesgos innatos)
+
+Por defecto, **ninguna decisión de un agente está sesgada**: cada movimiento,
+ataque o señal proviene únicamente de su cerebro (inicializado al azar, moldeado
+por evolución y aprendizaje en vida). Las versiones anteriores añadían dos genes
+de "temperamento" (`agg_bias`, `explore_bias`) directamente sobre las salidas de
+la red, lo que era un atajo. Ahora eso está **desactivado por defecto**; puedes
+reactivarlo con la opción *Sesgos innatos → sí* al crear un planeta si quieres
+comparar. Verificado: sin sesgos, el comportamiento sigue diferenciándose por
+evolución (no todos atacan) y los pesos rápidos siguen cambiando (los cerebros
+sí aprenden en vida).
+
 ## Una nota honesta sobre "significado medido"
 
 En poblaciones pequeñas o bajo mucho estrés (por ejemplo, cerca del colapso),

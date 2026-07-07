@@ -62,6 +62,14 @@ async function boot() {
 
   $("#world").addEventListener("click", onCanvasClick);
   window.addEventListener("resize", () => renderCurrent());
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      if (S.compareMode) cancelCompare();
+      else if ($("#compareBg").classList.contains("open")) $("#compareBg").classList.remove("open");
+      else if ($("#modalBg").classList.contains("open")) closeModal();
+      else if (S.selectedAgentId != null) closeInspector();
+    }
+  });
   requestAnimationFrame(loop);
   setInterval(pollAudioInteractions, 900);
   setInterval(refreshAgentDetail, 1500);
@@ -128,12 +136,20 @@ async function refreshList() {
     list.appendChild(el);
   });
   if (!S.current && S.sims.length === 0) showEmpty(true);
+  // on first load, restore the planet the observer was watching before refresh
+  if (!S.current && !S._restored && S.sims.length) {
+    S._restored = true;
+    let want = null;
+    try { want = localStorage.getItem("mv3_sim"); } catch (e) {}
+    if (want && S.sims.some((s) => s.id === want)) selectSim(want);
+  }
 }
 
 /* ---------------------------------------------------------- selection --- */
 function selectSim(id) {
   if (S.current === id) return;
   S.current = id; showEmpty(false); goLive();
+  try { localStorage.setItem("mv3_sim", id); } catch (e) {}
   S.selectedAgentId = null; S.agentDetail = null; S.followMode = false;
   S.seenInteractionIds = new Set();
   closeInspector();
@@ -332,25 +348,47 @@ function updateAgentList(state) {
 
 /* ---------------------------------------------------------- agent select */
 function selectAgent(aid) {
+  if (aid == null || Number.isNaN(aid)) return;
   if (S.compareMode && S.compareA != null && aid !== S.compareA) {
     openCompare(S.compareA, aid);
     return;
   }
+  // switching to a different agent: reset per-agent view state cleanly
+  if (aid !== S.selectedAgentId) {
+    S.agentDetail = null;
+    S.followMode = false;
+    $("#followBtn").classList.remove("on");
+  }
   S.selectedAgentId = aid;
-  $("#inspector").classList.add("show");
-  refreshAgentDetail();
+  const insp = $("#inspector");
+  insp.classList.add("show");
+  $("#insTitle").textContent = `#${aid}`;
+  $("#insBody").innerHTML = '<div style="color:var(--muted);padding:12px 0">Cargando…</div>';
+  refreshAgentDetail(true);
 }
 function closeInspector() {
   $("#inspector").classList.remove("show");
   S.selectedAgentId = null; S.agentDetail = null; S.followMode = false;
+  S.compareMode = false; S.compareA = null;
   $("#followBtn").classList.remove("on");
+  $("#compareBtn").classList.remove("on");
 }
-async function refreshAgentDetail() {
+async function refreshAgentDetail(force) {
   if (!S.current || S.selectedAgentId == null) return;
+  const reqId = S.selectedAgentId;       // capture: guard against out-of-order responses
   let d;
-  try { d = await api(`/api/simulations/${S.current}/agent/${S.selectedAgentId}`); } catch (e) { return; }
+  try { d = await api(`/api/simulations/${S.current}/agent/${reqId}`); } catch (e) { return; }
+  if (reqId !== S.selectedAgentId) return;   // user switched agents mid-request
+  if (!d || !d.live) {
+    // agent died or vanished — tell the observer instead of showing stale data
+    S.agentDetail = null;
+    $("#insTitle").textContent = `#${reqId}`;
+    $("#insBody").innerHTML =
+      '<div style="color:var(--danger);padding:12px 0">Este individuo ya no está vivo.</div>' +
+      '<div style="color:var(--muted);font-size:10.5px">Su historia sigue disponible en la pestaña Interacciones y en la exportación.</div>';
+    return;
+  }
   S.agentDetail = d;
-  if (!d.live) return;
   renderInspector(d);
 }
 const PBAR_COLOR = {
@@ -503,12 +541,30 @@ function renderInspector(d) {
 /* ---------------------------------------------------------- compare */
 function startCompare() {
   if (S.selectedAgentId == null) return;
+  if (S.compareMode) { cancelCompare(); return; }   // toggle off
   S.compareMode = true; S.compareA = S.selectedAgentId;
   $("#compareBtn").classList.add("on");
-  alert("Modo comparar activado. Elige un segundo individuo (clic en el mapa o en la lista de Agentes).");
+  let hint = $("#compareHint");
+  if (!hint) {
+    hint = document.createElement("div");
+    hint.id = "compareHint";
+    hint.style.cssText = "position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:8;" +
+      "background:#0a121bee;border:1px solid var(--warn);color:var(--warn);border-radius:20px;" +
+      "padding:6px 14px;font-size:12px;cursor:pointer";
+    hint.textContent = "Comparar: elige un segundo individuo · (clic aquí para cancelar)";
+    hint.onclick = cancelCompare;
+    $("#stage").appendChild(hint);
+  }
+  hint.style.display = "block";
+}
+function cancelCompare() {
+  S.compareMode = false; S.compareA = null;
+  $("#compareBtn").classList.remove("on");
+  const hint = $("#compareHint");
+  if (hint) hint.style.display = "none";
 }
 async function openCompare(a, b) {
-  S.compareMode = false; $("#compareBtn").classList.remove("on");
+  cancelCompare();
   let d; try { d = await api(`/api/simulations/${S.current}/compare?a=${a}&b=${b}`); } catch (e) { return; }
   const A = d.a, B = d.b;
   const rows = [
@@ -593,7 +649,7 @@ function inspectNear(wx, wy, base) {
     const d = (a[0] - wx) ** 2 + (a[1] - wy) ** 2;
     if (d < bd) { bd = d; best = a; }
   }
-  if (!best || bd > 40) return;
+  if (!best || bd > 64) return;   // ~8 cells tolerance: easier to hit small dots
   selectAgent(best[6]);
 }
 
@@ -612,6 +668,7 @@ async function deleteSim() {
   if (!S.current || !confirm("¿Eliminar este planeta y toda su historia?")) return;
   await api(`/api/simulations/${S.current}`, { method: "DELETE" }).catch(() => {});
   if (S.ws) { try { S.ws.close(); } catch (e) {} }
+  try { if (localStorage.getItem("mv3_sim") === S.current) localStorage.removeItem("mv3_sim"); } catch (e) {}
   S.current = null; S.state = null; closeInspector();
   $("#toolbar").style.display = "none"; $("#timeline").style.display = "none";
   showEmpty(true); refreshList();

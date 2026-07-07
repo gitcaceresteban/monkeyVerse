@@ -49,9 +49,11 @@ class Simulation:
         self.rng = np.random.default_rng(self.seed)
 
         self.world = World(cfg, self.rng)
-        self.species = SpeciesRegistry(cfg.species_threshold, self.rng)
+        self.species = SpeciesRegistry(cfg.species_threshold, self.rng,
+                                       min_members=getattr(cfg, "species_min_members", 3))
         self.milestones = MilestoneTracker()
         self.symbol_stats = SymbolStats()
+        self.innate = bool(getattr(cfg, "innate_biases", False))
 
         self.S = N_SYMBOLS                      # the spoken language: fixed at 10 digits
         self.P = max(0, cfg.pheromone_channels)
@@ -294,8 +296,9 @@ class Simulation:
             # --- movement (curiosity mixes in exploration) ---
             logits = out[self.OUT_MOVE:self.OUT_MOVE + 9]
             p = np.exp(logits - logits.max()); p /= p.sum()
-            e = g["explore_bias"] * 0.5
-            p = (1 - e) * p + e / 9.0
+            if self.innate:                       # optional innate curiosity
+                e = g["explore_bias"] * 0.5
+                p = (1 - e) * p + e / 9.0
             resting = _sig(out[self.OUT_REST]) > 0.6
             a.resting = resting
             a.moved = False
@@ -339,8 +342,10 @@ class Simulation:
                                         nearest, tick_interactions, pair_logged)
 
             reproduced = False
-            if (len(self.agents) + len(newborns) < cap and _sig(out[self.OUT_REPRO]) > 0.5
-                    and a.energy > g["repro_threshold"]):
+            crowd = self.cfg.repro_crowd_limit
+            not_crowded = crowd <= 0 or dens < crowd
+            if (len(self.agents) + len(newborns) < cap and not_crowded
+                    and _sig(out[self.OUT_REPRO]) > 0.5 and a.energy > g["repro_threshold"]):
                 child = self._reproduce(a, g, tick_interactions)
                 if child is not None:
                     newborns.append(child)
@@ -568,7 +573,8 @@ class Simulation:
             a.energy += take
 
     def _maybe_attack(self, a, out, buckets, g, danger_field, tick_bucket, pair_logged):
-        if _sig(out[self.OUT_ATTACK] + g["agg_bias"]) <= 0.5:
+        bias = g["agg_bias"] if self.innate else 0.0
+        if _sig(out[self.OUT_ATTACK] + bias) <= 0.5:
             return None
         a.energy -= self.cfg.attack_cost
         for dx, dy in MOVE[1:] + [(0, 0)]:
